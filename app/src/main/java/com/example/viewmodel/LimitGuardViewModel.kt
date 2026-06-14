@@ -114,10 +114,35 @@ class LimitGuardViewModel(private val repository: LimitRepository) : ViewModel()
 
     val allWallets: StateFlow<List<Wallet>> = combine(
         repository.allWallets,
-        walletBalances
-    ) { walletsList, balancesMap ->
+        walletBalances,
+        allTransactions
+    ) { walletsList, balancesMap, transactionsList ->
+        val startOfToday = getStartOfToday()
+        val startOfThisMonth = getStartOfThisMonth()
+
+        fun getWalletSeverity(wallet: Wallet): Int {
+            val walletTxs = transactionsList.filter { it.senderWalletNumber == wallet.phoneNumber }
+            val spentTodayVal = walletTxs.filter { !it.isDeposit && it.timestamp >= startOfToday }.sumOf { it.amount }
+            val spentMonthVal = walletTxs.filter { !it.isDeposit && it.timestamp >= startOfThisMonth }.sumOf { it.amount }
+            val depositedTodayVal = walletTxs.filter { it.isDeposit && it.timestamp >= startOfToday }.sumOf { it.amount }
+            val prevMonthBalance = getWalletBalanceAtStartOfMonth(wallet, transactionsList)
+            val depositedMonthVal = walletTxs.filter { it.isDeposit && it.timestamp >= startOfThisMonth }.sumOf { it.amount } + prevMonthBalance
+
+            val ratioOutToday = if (wallet.dailyLimit > 0) spentTodayVal / wallet.dailyLimit else 0.0
+            val ratioOutMonth = if (wallet.monthlyLimit > 0) spentMonthVal / wallet.monthlyLimit else 0.0
+            val ratioInToday = if (wallet.dailyDepositLimit > 0) depositedTodayVal / wallet.dailyDepositLimit else 0.0
+            val ratioInMonth = if (wallet.monthlyDepositLimit > 0) depositedMonthVal / wallet.monthlyDepositLimit else 0.0
+
+            val maxRatio = maxOf(ratioOutToday, ratioOutMonth, ratioInToday, ratioInMonth)
+            return when {
+                maxRatio >= 1.0 -> 2 // Exceeded
+                maxRatio >= 0.95 -> 1 // Approaching (95%+)
+                else -> 0 // Safe
+            }
+        }
+
         walletsList.sortedWith(
-            compareByDescending<Wallet> { (balancesMap[it.phoneNumber] ?: 0.0) > 0 }
+            compareBy<Wallet> { getWalletSeverity(it) }
                 .thenByDescending { balancesMap[it.phoneNumber] ?: 0.0 }
                 .thenBy { it.label }
         )
