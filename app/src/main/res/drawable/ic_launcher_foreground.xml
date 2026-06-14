@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Safe Limit Meter Arc (75% Ring) -->
+    <path
+        android:pathData="M54,16 A38,38 0 1 1 20,68"
+        android:strokeColor="#E60000"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M20,68 A38,38 0 0 1 54,16"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+
+    <!-- Inside Glowing Red Shield -->
+    <path
+        android:pathData="M54,24 L78,34 L78,54 C78,69.5 67.8,83.7 54,87.8 C40.2,83.7 30,69.5 30,54 L30,34 L54,24 Z"
+        android:strokeWidth="2.5"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineJoin="round">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="24"
+                android:endX="54"
+                android:endY="87.8"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF3B30" />
+                <item android:offset="1.0" android:color="#9E0000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- White Lock inside the shield representing Limit Guard/Lock -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42 C50.7,42 48,44.7 48,48 L48,51 L45,51 L45,66 L63,66 L63,51 L60,51 L60,48 C60,44.7 57.3,42 54,42 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M51,51 L51,48 C51,46.3 52.3,45 54,45 C55.7,45 57,46.3 57,48 L57,51" />
+    
+    <!-- Keyhole inside lock -->
+    <path
+        android:fillColor="#FF2D55"
+        android:pathData="M54,54.5 C52.9,54.5 52,55.4 52,56.5 C52,57.3 52.5,58.0 53,58.3 L53,61.5 L55,61.5 L55,58.3 C55.5,58.0 56,57.3 56,56.5 C56,55.4 55.1,54.5 54,54.5 Z" />
+</vector>

@@ -11,7 +11,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.example"
+    applicationId = "com.aistudio.cashaty.uqkptz"
     minSdk = 24
     targetSdk = 36
     versionCode = 3
@@ -22,19 +22,11 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: ""
-      val keyFile = if (keystorePath.isNotEmpty()) file(keystorePath) else null
-      if (keyFile != null && keyFile.exists() && System.getenv("STORE_PASSWORD") != null) {
-        storeFile = keyFile
-        storePassword = System.getenv("STORE_PASSWORD")
-        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-        keyPassword = System.getenv("KEY_PASSWORD")
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-      }
+      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      storeFile = file(keystorePath)
+      storePassword = System.getenv("STORE_PASSWORD")
+      keyAlias = "upload"
+      keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -128,50 +120,14 @@ dependencies {
   "ksp"(libs.moshi.kotlin.codegen)
 }
 
-val buildDirFile = project.layout.buildDirectory.get().asFile
-val rootDirFile = rootDir
-
-tasks.register("copyApks") {
-    val srcDebug = File(buildDirFile, "outputs/apk/debug/app-debug.apk")
-    val srcRelease = File(buildDirFile, "outputs/apk/release/app-release.apk")
-    val destDir = File(rootDirFile, "build-outputs")
-    val dotDestDir = File(rootDirFile, ".build-outputs")
-
-    doLast {
-        destDir.mkdirs()
-        dotDestDir.mkdirs()
-        
-        if (srcDebug.exists()) {
-            println("Copying debug APK of size: ${srcDebug.length()} bytes")
-            srcDebug.copyTo(File(destDir, "Kashati_App_Installer.apk"), overwrite = true)
-            srcDebug.copyTo(File(destDir, "Kashati.apk"), overwrite = true)
-            srcDebug.copyTo(File(destDir, "app-debug.apk"), overwrite = true)
-            
-            srcDebug.copyTo(File(dotDestDir, "Kashati_App_Installer.apk"), overwrite = true)
-            srcDebug.copyTo(File(dotDestDir, "Kashati.apk"), overwrite = true)
-            srcDebug.copyTo(File(dotDestDir, "app-debug.apk"), overwrite = true)
-        } else {
-            println("Debug APK not found at: ${srcDebug.absolutePath}")
-        }
-        
-        if (srcRelease.exists()) {
-            println("Copying release APK of size: ${srcRelease.length()} bytes")
-            srcRelease.copyTo(File(destDir, "Kashati_App_Installer.apk"), overwrite = true)
-            srcRelease.copyTo(File(destDir, "Kashati.apk"), overwrite = true)
-            srcRelease.copyTo(File(destDir, "app-release.apk"), overwrite = true)
-            
-            srcRelease.copyTo(File(dotDestDir, "Kashati_App_Installer.apk"), overwrite = true)
-            srcRelease.copyTo(File(dotDestDir, "Kashati.apk"), overwrite = true)
-            srcRelease.copyTo(File(dotDestDir, "app-release.apk"), overwrite = true)
-        } else {
-            println("Release APK not found at: ${srcRelease.absolutePath}")
-        }
-    }
+tasks.register<Copy>("copyApkToBuildOutputs") {
+    from(file("${layout.buildDirectory.get().asFile}/outputs/apk/debug/app-debug.apk"))
+    into(file("${rootDir}/build-outputs/"))
 }
 
-// Ensure copyApks runs automatically after app assemble stages safely
-afterEvaluate {
-    tasks.findByName("assembleDebug")?.finalizedBy("copyApks")
-    tasks.findByName("assembleRelease")?.finalizedBy("copyApks")
+tasks.configureEach {
+    if (name == "assembleDebug" || name == "assemble") {
+        finalizedBy("copyApkToBuildOutputs")
+    }
 }
 

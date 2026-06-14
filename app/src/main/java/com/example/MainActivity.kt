@@ -709,7 +709,6 @@ fun LimitGuardDashboard(
                             leftInbound = (monthlyDepositLimit - depositedThisMonth).coerceAtLeast(0.0),
                             isMonthly = true,
                             formatter = currencyFormatter,
-                            carriedOverAmount = carriedOverDepositLimit,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -1502,7 +1501,30 @@ fun Modifier.swipeToSwitchWallet(
     activeWallet: Wallet?,
     onSelectWallet: (Wallet) -> Unit
 ): Modifier {
-    return this
+    if (wallets.size <= 1) return this
+    return this.pointerInput(wallets, activeWallet) {
+        var totalDrag = 0f
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                val activeIndex = wallets.indexOfFirst { it.phoneNumber == (activeWallet?.phoneNumber ?: "") }
+                if (activeIndex != -1) {
+                    if (totalDrag > 120f) {
+                        // Swipe Right -> Select Previous Wallet (Arabic RTL layout friendly)
+                        val prevIndex = if (activeIndex > 0) activeIndex - 1 else wallets.size - 1
+                        onSelectWallet(wallets[prevIndex])
+                    } else if (totalDrag < -120f) {
+                        // Swipe Left -> Select Next Wallet
+                        val nextIndex = if (activeIndex < wallets.size - 1) activeIndex + 1 else 0
+                        onSelectWallet(wallets[nextIndex])
+                    }
+                }
+                totalDrag = 0f
+            },
+            onHorizontalDrag = { _, dragAmount ->
+                totalDrag += dragAmount
+            }
+        )
+    }
 }
 
 data class AlertVisuals(
@@ -1651,7 +1673,6 @@ fun NestedCircularProgressDonut(
     leftInbound: Double,
     isMonthly: Boolean,
     formatter: DecimalFormat,
-    carriedOverAmount: Double = 0.0,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -1664,34 +1685,13 @@ fun NestedCircularProgressDonut(
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = DynamicWhite,
                 modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = DynamicWhite
-                )
-                if (isMonthly && carriedOverAmount > 0.0) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(SafeGreen.copy(alpha = 0.15f))
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "🔄 +${formatter.format(carriedOverAmount)}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                            color = SafeGreen,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
+            )
             
             Box(
                 modifier = Modifier.size(110.dp),
@@ -1822,16 +1822,16 @@ fun NestedCircularProgressDonut(
             ) {
                 // Outbound/Transfer Remaining Box
                 val leftOutboundStr = "${formatter.format(leftOutbound)} ج.م"
-                val leftOutboundFontSize = if (leftOutboundStr.length > 12) 12.sp else if (leftOutboundStr.length > 9) 14.sp else 16.sp
+                val leftOutboundFontSize = if (leftOutboundStr.length > 12) 11.sp else if (leftOutboundStr.length > 9) 13.sp else 15.sp
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(41.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(CharcoalBg.copy(alpha = 0.40f))
                         .border(1.dp, outboundColor.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -1846,7 +1846,7 @@ fun NestedCircularProgressDonut(
                             textAlign = TextAlign.Center,
                             maxLines = 1
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(1.dp))
                         Text(
                             text = leftOutboundStr,
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = leftOutboundFontSize, fontWeight = FontWeight.Black),
@@ -1859,16 +1859,16 @@ fun NestedCircularProgressDonut(
 
                 // Inbound/Deposit Remaining Box
                 val leftInboundStr = "${formatter.format(leftInbound)} ج.م"
-                val leftInboundFontSize = if (leftInboundStr.length > 12) 12.sp else if (leftInboundStr.length > 9) 14.sp else 16.sp
+                val leftInboundFontSize = if (leftInboundStr.length > 12) 11.sp else if (leftInboundStr.length > 9) 13.sp else 15.sp
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(41.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(CharcoalBg.copy(alpha = 0.40f))
                         .border(1.dp, inboundColor.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -1883,7 +1883,7 @@ fun NestedCircularProgressDonut(
                             textAlign = TextAlign.Center,
                             maxLines = 1
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(1.dp))
                         Text(
                             text = leftInboundStr,
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = leftInboundFontSize, fontWeight = FontWeight.Black),
@@ -3479,29 +3479,22 @@ fun WalletBar(
 
                 val isLimitReached = reachedDailyTransferLimit || reachedMonthlyTransferLimit || reachedDailyDepositLimit || reachedMonthlyDepositLimit
 
-                val isNearLimit = (wallet.dailyLimit > 0 && spentTodayVal >= 0.95 * wallet.dailyLimit) ||
-                                  (wallet.monthlyLimit > 0 && spentMonthVal >= 0.95 * wallet.monthlyLimit) ||
-                                  (wallet.dailyDepositLimit > 0 && depositedTodayVal >= 0.95 * wallet.dailyDepositLimit) ||
-                                  (wallet.monthlyDepositLimit > 0 && depositedMonthVal >= 0.95 * wallet.monthlyDepositLimit)
-
                 // Determine colors based on design specifications to satisfy user intent
                 val containerColor = when {
                     isActive -> VodafoneRed
                     isLimitReached -> Color(0xFF331616) // Rich deep wine red indicating limit exhaustion
-                    isNearLimit -> Color(0xFF2C2214) // Deep warm amber for warning
                     hasTransactions -> Color(0xFF10281F) // Smooth forest-green indicating used but safe wallet
                     else -> CharcoalCard // Muted gray indicating fresh, unused wallet
                 }
                 
                 val borderColor = when {
-                    isActive -> if (isLimitReached) WarningOrange else if (isNearLimit) WarningOrange else VodafoneRed
+                    isActive -> if (isLimitReached) WarningOrange else VodafoneRed
                     isLimitReached -> ExceededRed
-                    isNearLimit -> WarningOrange
                     hasTransactions -> SafeGreen
                     else -> CharcoalBorder
                 }
 
-                val borderWidth = if (isActive || isLimitReached || isNearLimit || hasTransactions) 1.5.dp else 1.dp
+                val borderWidth = if (isActive || isLimitReached || hasTransactions) 1.5.dp else 1.dp
 
                 Card(
                     colors = CardDefaults.cardColors(
@@ -3521,7 +3514,7 @@ fun WalletBar(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
-                              ) {
+                            ) {
                                 Text(
                                     text = wallet.label,
                                     style = MaterialTheme.typography.labelLarge,
@@ -3531,20 +3524,17 @@ fun WalletBar(
                                 
                                 // Beautiful Arabic badges to distinguish limits and activities
                                 val statusText = when {
-                                    isLimitReached -> "مكتملة الحد 🔴"
-                                    isNearLimit -> "قريبة من الحد ⚠️"
-                                    hasTransactions -> "نشطة وآمنة ✨"
-                                    else -> "غير مستخدمة ⚪"
+                                    isLimitReached -> "مكتملة الحد ⚠️"
+                                    hasTransactions -> "مستعملة 🟢"
+                                    else -> "لم تُستخدم ⚪"
                                 }
                                 val statusColor = when {
                                     isLimitReached -> if (isActive) Color.White else ExceededRed
-                                    isNearLimit -> if (isActive) Color.White else WarningOrange
                                     hasTransactions -> if (isActive) Color.White else SafeGreen
                                     else -> if (isActive) Color.White.copy(alpha = 0.8f) else MutedText
                                 }
                                 val statusBg = when {
                                     isLimitReached -> if (isActive) Color.White.copy(alpha = 0.25f) else ExceededRed.copy(alpha = 0.15f)
-                                    isNearLimit -> if (isActive) Color.White.copy(alpha = 0.25f) else WarningOrange.copy(alpha = 0.15f)
                                     hasTransactions -> if (isActive) Color.White.copy(alpha = 0.25f) else SafeGreen.copy(alpha = 0.15f)
                                     else -> if (isActive) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.05f)
                                 }

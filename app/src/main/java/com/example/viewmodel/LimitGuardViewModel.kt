@@ -114,41 +114,10 @@ class LimitGuardViewModel(private val repository: LimitRepository) : ViewModel()
 
     val allWallets: StateFlow<List<Wallet>> = combine(
         repository.allWallets,
-        walletBalances,
-        allTransactions
-    ) { walletsList, balancesMap, transactionsList ->
-        val startOfToday = getStartOfToday()
-        val startOfThisMonth = getStartOfThisMonth()
-
-        fun isWalletNearLimit(wallet: Wallet): Boolean {
-            val walletTxs = transactionsList.filter { it.senderWalletNumber == wallet.phoneNumber }
-            val spentTodayVal = walletTxs.filter { !it.isDeposit && it.timestamp >= startOfToday }.sumOf { it.amount }
-            val spentMonthVal = walletTxs.filter { !it.isDeposit && it.timestamp >= startOfThisMonth }.sumOf { it.amount }
-            val depositedTodayVal = walletTxs.filter { it.isDeposit && it.timestamp >= startOfToday }.sumOf { it.amount }
-
-            val initial = wallet.initialBalance
-            val prevTxs = walletTxs.filter { it.timestamp < startOfThisMonth }
-            var carryOver = initial
-            prevTxs.forEach { tx ->
-                if (tx.isDeposit) carryOver += tx.amount else carryOver -= tx.amount
-            }
-            val extraDeposit = carryOver.coerceAtLeast(0.0)
-            val depositedThisMonthVal = walletTxs.filter { it.isDeposit && it.timestamp >= startOfThisMonth }.sumOf { it.amount } + extraDeposit
-
-            val dailyLimit = wallet.dailyLimit
-            val monthlyLimit = wallet.monthlyLimit
-            val dailyDepositLimit = wallet.dailyDepositLimit
-            val monthlyDepositLimit = wallet.monthlyDepositLimit
-
-            return (dailyLimit > 0 && spentTodayVal >= 0.95 * dailyLimit) ||
-                    (monthlyLimit > 0 && spentMonthVal >= 0.95 * monthlyLimit) ||
-                    (dailyDepositLimit > 0 && depositedTodayVal >= 0.95 * dailyDepositLimit) ||
-                    (monthlyDepositLimit > 0 && depositedThisMonthVal >= 0.95 * monthlyDepositLimit)
-        }
-
+        walletBalances
+    ) { walletsList, balancesMap ->
         walletsList.sortedWith(
-            compareBy<Wallet> { isWalletNearLimit(it) }
-                .thenByDescending { (balancesMap[it.phoneNumber] ?: 0.0) > 0 }
+            compareByDescending<Wallet> { (balancesMap[it.phoneNumber] ?: 0.0) > 0 }
                 .thenByDescending { balancesMap[it.phoneNumber] ?: 0.0 }
                 .thenBy { it.label }
         )
