@@ -22,6 +22,7 @@ import android.content.Context
 class LimitGuardViewModel(private val repository: LimitRepository) : ViewModel() {
 
     // App Lock & Tamper Protection parameters
+    var isPrivacyMasking by mutableStateOf(false)
     var isAppUnlocked by mutableStateOf(false)
         private set
     var showSecuritySettingsDialog by mutableStateOf(false)

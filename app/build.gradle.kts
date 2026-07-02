@@ -10,15 +10,15 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
-  defaultConfig {
-    applicationId = "com.aistudio.cashaty.uqkptz"
-    minSdk = 24
-    targetSdk = 36
-    versionCode = 3
-    versionName = "v3"
+    defaultConfig {
+        applicationId = "com.aistudio.cashaty.uqkptz"
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 4
+        versionName = "v4"
 
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-  }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 
   signingConfigs {
     create("release") {
@@ -121,8 +121,10 @@ dependencies {
 }
 
 tasks.register<Copy>("copyApkToBuildOutputs") {
-    from(file("${layout.buildDirectory.get().asFile}/outputs/apk/debug/app-debug.apk"))
-    into(file("${rootDir}/build-outputs/"))
+    from(file("${layout.buildDirectory.get().asFile}/outputs/apk/debug/app-debug.apk")) {
+        rename { "Kashati.apk" }
+    }
+    into(file("${rootDir}/Kashati/"))
 }
 
 tasks.configureEach {

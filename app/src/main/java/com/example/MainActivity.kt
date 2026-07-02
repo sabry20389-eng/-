@@ -111,11 +111,21 @@ fun LimitGuardDashboard(
     var activeThemeId by remember { mutableStateOf(0) }
     var showThemeSelectorDialog by remember { mutableStateOf(false) }
 
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
     LaunchedEffect(Unit) {
+        com.example.util.NotificationHelper.createNotificationChannel(context)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
+        }
+
         val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         val savedThemeId = prefs.getInt("selected_theme_id", 0)
         activeThemeId = savedThemeId
         isOutdoorMode = prefs.getBoolean("is_outdoor_mode", false)
+        viewModel.isPrivacyMasking = prefs.getBoolean("is_privacy_masking", false)
 
         val isFirstLaunch = prefs.getBoolean("is_first_launch_v2", true)
         if (isFirstLaunch) {
@@ -135,6 +145,13 @@ fun LimitGuardDashboard(
         { outdoor ->
             isOutdoorMode = outdoor
             context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit().putBoolean("is_outdoor_mode", outdoor).apply()
+        }
+    }
+
+    val togglePrivacyMasking: (Boolean) -> Unit = remember {
+        { mask ->
+            viewModel.isPrivacyMasking = mask
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit().putBoolean("is_privacy_masking", mask).apply()
         }
     }
 
@@ -473,7 +490,9 @@ fun LimitGuardDashboard(
                 onLockClick = { viewModel.lockApp() },
                 onThemeClick = { showThemeSelectorDialog = true },
                 isOutdoorMode = isOutdoorMode,
-                onOutdoorModeToggle = toggleOutdoorMode
+                onOutdoorModeToggle = toggleOutdoorMode,
+                isPrivacyMasking = viewModel.isPrivacyMasking,
+                onPrivacyMaskingToggle = togglePrivacyMasking
             )
 
         // Calculate filtered transactions for both list and export features
@@ -568,7 +587,7 @@ fun LimitGuardDashboard(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "${currencyFormatter.format(totalBalance)} ج.م",
+                                text = "${if (viewModel.isPrivacyMasking) "••••" else currencyFormatter.format(totalBalance)} ج.م",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Black,
                                 color = DynamicWhite,
@@ -603,9 +622,12 @@ fun LimitGuardDashboard(
                     onDeleteWallet = {
                         viewModel.deleteWallet(it)
                         Toast.makeText(context, "تم حذف الرقم: ${it.label}", Toast.LENGTH_SHORT).show()
-                    }
+                    },
+                    isPrivacyMasking = viewModel.isPrivacyMasking
                 )
             }
+
+
 
 
 
@@ -629,7 +651,7 @@ fun LimitGuardDashboard(
                 val dailyOutColor = when {
                     spentToday >= dailyLimit -> ExceededRed
                     spentToday >= transferThresholdDaily -> WarningOrange
-                    else -> SafeGreen
+                    else -> ExceededRed.copy(alpha = 0.75f)
                 }
                 val dailyInColor = when {
                     depositedToday >= dailyDepositLimit -> ExceededRed
@@ -639,7 +661,7 @@ fun LimitGuardDashboard(
                 val monthlyOutColor = when {
                     spentThisMonth >= monthlyLimit -> ExceededRed
                     spentThisMonth >= transferThresholdMonthly -> WarningOrange
-                    else -> SafeGreen
+                    else -> ExceededRed.copy(alpha = 0.75f)
                 }
                 val monthlyInColor = when {
                     depositedThisMonth >= monthlyDepositLimit -> ExceededRed
@@ -685,6 +707,7 @@ fun LimitGuardDashboard(
                             leftInbound = (dailyDepositLimit - depositedToday).coerceAtLeast(0.0),
                             isMonthly = false,
                             formatter = currencyFormatter,
+                            isPrivacyMasking = viewModel.isPrivacyMasking,
                             modifier = Modifier.weight(1f)
                         )
 
@@ -703,6 +726,7 @@ fun LimitGuardDashboard(
                             isMonthly = true,
                             formatter = currencyFormatter,
                             carriedOver = carriedOverDepositLimit,
+                            isPrivacyMasking = viewModel.isPrivacyMasking,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -724,8 +748,41 @@ fun LimitGuardDashboard(
                     onNotesChange = { viewModel.onNotesChange(it) },
                     onTimestampChange = { viewModel.onTimestampChange(it) },
                     onAddTransaction = {
+                        val currentWarning = liveWarning.level
+                        val currentWarningMessage = liveWarning.message
+                        val isDep = viewModel.isDepositInput
+                        val amtText = viewModel.amountText
+                        val amt = amtText.toDoubleOrNull() ?: 0.0
+
                         viewModel.addTransaction()
                         Toast.makeText(context, "تم تسجيل العملية بنجاح", Toast.LENGTH_SHORT).show()
+
+                        if (currentWarning != com.example.viewmodel.LiveWarningLevel.NONE && currentWarningMessage.isNotEmpty()) {
+                            val title = if (currentWarning == com.example.viewmodel.LiveWarningLevel.CRITICAL) {
+                                "🚨 تنبيه تجاوز الحد المالي الحرج"
+                            } else {
+                                "⚠️ تنبيه اقتراب من الحد المالي"
+                            }
+                            com.example.util.NotificationHelper.sendSmartNotification(
+                                context = context,
+                                id = (System.currentTimeMillis() % 100000).toInt(),
+                                title = title,
+                                message = currentWarningMessage
+                            )
+                        } else if (amt > 0) {
+                            val txTitle = if (isDep) "💰 نجاح عملية الشحن والإيداع" else "💸 نجاح عملية التحويل والسحب"
+                            val txMessage = if (isDep) {
+                                "تم إيداع مبلغ ${currencyFormatter.format(amt)} ج.م بنجاح إلى محفظتك. حدودك الحالية محدثة الآن تلقائياً."
+                            } else {
+                                "تم تحويل مبلغ ${currencyFormatter.format(amt)} ج.م بنجاح. سنراقب حدودك المالية أولاً بأول لحمايتها."
+                            }
+                            com.example.util.NotificationHelper.sendSmartNotification(
+                                context = context,
+                                id = (System.currentTimeMillis() % 100000).toInt(),
+                                title = txTitle,
+                                message = txMessage
+                            )
+                        }
                     },
                     onDialUssd = {
                         val ussd = viewModel.getUssdCode()
@@ -928,7 +985,8 @@ fun LimitGuardDashboard(
                         transaction = tx,
                         balanceAfter = balAfter,
                         onDelete = { transactionToDelete = tx },
-                        formatter = currencyFormatter
+                        formatter = currencyFormatter,
+                        isPrivacyMasking = viewModel.isPrivacyMasking
                     )
                 }
             }
@@ -976,6 +1034,8 @@ fun HeaderView(
     onThemeClick: () -> Unit = {},
     isOutdoorMode: Boolean = false,
     onOutdoorModeToggle: (Boolean) -> Unit = {},
+    isPrivacyMasking: Boolean = false,
+    onPrivacyMaskingToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -998,7 +1058,7 @@ fun HeaderView(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "كاشاتى",
+                    text = "Kashati",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     color = VodafoneLightRed
@@ -1070,6 +1130,19 @@ fun HeaderView(
             }
 
             IconButton(
+                onClick = { onPrivacyMaskingToggle(!isPrivacyMasking) },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("privacy_masking_btn")
+            ) {
+                Icon(
+                    imageVector = if (isPrivacyMasking) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = "وضع الخصوصية",
+                    tint = if (isPrivacyMasking) VodafoneLightRed else Color.White
+                )
+            }
+
+            IconButton(
                 onClick = onSettingsClick,
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
@@ -1086,13 +1159,14 @@ fun HeaderView(
                 IconButton(
                     onClick = { showMenu = true },
                     modifier = Modifier
-                        .minimumInteractiveComponentSize()
+                        .size(48.dp)
                         .testTag("menu_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "قائمة إضافية",
-                        tint = Color.White
+                        tint = Color.White,
+                        modifier = Modifier.size(36.dp)
                     )
                 }
                 DropdownMenu(
@@ -1101,7 +1175,7 @@ fun HeaderView(
                     modifier = Modifier.background(CharcoalSurface)
                 ) {
                     DropdownMenuItem(
-                        text = { Text("درع الأمان وحماية البيئة", color = Color.White) },
+                        text = { Text("درع الأمان وحماية البيئة", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                         onClick = {
                             showMenu = false
                             onSecurityClick()
@@ -1110,7 +1184,8 @@ fun HeaderView(
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = SafeGreen
+                                tint = SafeGreen,
+                                modifier = Modifier.size(28.dp)
                             )
                         }
                     )
@@ -1137,7 +1212,7 @@ fun HeaderView(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("وضع الشمس الخارجي ☀️", color = Color.White)
+                                Text("وضع الشمس الخارجي ☀️", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                 Switch(
                                     checked = isOutdoorMode,
                                     onCheckedChange = { 
@@ -1159,7 +1234,8 @@ fun HeaderView(
                             Icon(
                                 imageVector = Icons.Default.WbSunny,
                                 contentDescription = null,
-                                tint = WarningOrange
+                                tint = WarningOrange,
+                                modifier = Modifier.size(28.dp)
                             )
                         }
                     )
@@ -1191,8 +1267,10 @@ fun SmartAnalyticsDashboard(
     activeWallet: Wallet?,
     settings: LimitSettings,
     formatter: DecimalFormat,
+    isPrivacyMasking: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var isExpanded by remember { mutableStateOf(false) }
 
     // Calculate details for active wallet
@@ -1202,7 +1280,7 @@ fun SmartAnalyticsDashboard(
     }
 
     // AI Prediction engine: Calculates average daily spend and predicts days until limit is exceeded
-    val aiBriefText = remember(walletTxs, activeWallet, settings) {
+    val aiBriefText = remember(walletTxs, activeWallet, settings, isPrivacyMasking) {
         val dailyLimit = activeWallet?.dailyLimit ?: settings.dailyLimit
         val monthlyLimit = activeWallet?.monthlyLimit ?: settings.monthlyLimit
         val currentDay = Calendar.getInstance().get(Calendar.DAY_OF_MONTH).coerceIn(1, 30)
@@ -1216,7 +1294,7 @@ fun SmartAnalyticsDashboard(
             "لم يتم رصد أي عمليات سحب هذا الشهر بعد. حدودك المالية في أمان تام بنسبة 100%!"
         } else {
             val daysLeftValue = remainingMonthlyLimit / avgDailySpend
-            val formattedAvg = formatter.format(avgDailySpend)
+            val formattedAvg = if (isPrivacyMasking) "••••" else formatter.format(avgDailySpend)
             if (daysLeftValue <= 5) {
                 "⚠️ تنبيه الاستهلاك الذكي: بناءً على معدل إنفاقك الحالي ($formattedAvg ج.م/يومياً)، يرجى الحذر! قد تتجاوز حدك الشهري للهذه المحفظة خلال ${daysLeftValue.toInt()} أيام!"
             } else if (daysLeftValue <= 10) {
@@ -1340,6 +1418,25 @@ fun SmartAnalyticsDashboard(
                                 color = DynamicWhite,
                                 lineHeight = 18.sp
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = {
+                                    com.example.util.NotificationHelper.sendSmartNotification(
+                                        context = context,
+                                        id = 999,
+                                        title = "🔔 تحديث ذكي من مستشارك المالي",
+                                        message = "معدل استهلاكك اليومي متزن للغاية حالياً ومحمي بالكامل 🦾. للمحافظة على نسبة الأمان، نوصي بالإبقاء على وضع الخصوصية ساري المفعول!"
+                                    )
+                                    Toast.makeText(context, "تم إرسال التنبيه الاستباقي الذكي للشاشة بنجاح!", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = VodafoneRed),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("إرسال تنبيه تجريبي استباقي 🔔", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
                         }
                     }
 
@@ -1408,7 +1505,7 @@ fun SmartAnalyticsDashboard(
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "المنفق: ${formatter.format(totalTransfersMonth)} ج.م",
+                                    text = "المنفق: ${if (isPrivacyMasking) "••••" else formatter.format(totalTransfersMonth)} ج.م",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = DynamicWhite,
                                     textAlign = TextAlign.Center
@@ -1443,7 +1540,7 @@ fun SmartAnalyticsDashboard(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text("سحب وتحويل", style = MaterialTheme.typography.labelSmall, color = DynamicWhite)
-                                        Text("${formatter.format(totalTransfersMonth)} ج.م", style = MaterialTheme.typography.labelSmall, color = VodafoneRed, fontWeight = FontWeight.Bold)
+                                        Text("${if (isPrivacyMasking) "••••" else formatter.format(totalTransfersMonth)} ج.م", style = MaterialTheme.typography.labelSmall, color = VodafoneRed, fontWeight = FontWeight.Bold)
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     LinearProgressIndicator(
@@ -1461,7 +1558,7 @@ fun SmartAnalyticsDashboard(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text("إيداع وشحن", style = MaterialTheme.typography.labelSmall, color = DynamicWhite)
-                                        Text("${formatter.format(totalDepositsMonth)} ج.م", style = MaterialTheme.typography.labelSmall, color = SafeGreen, fontWeight = FontWeight.Bold)
+                                        Text("${if (isPrivacyMasking) "••••" else formatter.format(totalDepositsMonth)} ج.م", style = MaterialTheme.typography.labelSmall, color = SafeGreen, fontWeight = FontWeight.Bold)
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
                                     LinearProgressIndicator(
@@ -1668,6 +1765,7 @@ fun NestedCircularProgressDonut(
     isMonthly: Boolean,
     formatter: DecimalFormat,
     carriedOver: Double = 0.0,
+    isPrivacyMasking: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -1702,7 +1800,7 @@ fun NestedCircularProgressDonut(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "مرحل: +${formatter.format(carriedOver)}",
+                            text = "مرحل: +${if (isPrivacyMasking) "••••" else formatter.format(carriedOver)}",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.8.sp),
                             color = SafeGreen,
                             fontWeight = FontWeight.Bold
@@ -1809,7 +1907,7 @@ fun NestedCircularProgressDonut(
                     Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(outboundColor))
                     Text("الصادر :", style = MaterialTheme.typography.labelSmall, color = MutedText)
                 }
-                Text("$outboundSpent / $outboundLimit", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = DynamicWhite)
+                Text("${if (isPrivacyMasking) "••••" else outboundSpent} / ${if (isPrivacyMasking) "••••" else outboundLimit}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = DynamicWhite)
             }
             
             Spacer(modifier = Modifier.height(4.dp))
@@ -1826,7 +1924,7 @@ fun NestedCircularProgressDonut(
                     Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(inboundColor))
                     Text("الوارد :", style = MaterialTheme.typography.labelSmall, color = MutedText)
                 }
-                Text("$inboundCollected / $inboundLimit", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = DynamicWhite)
+                Text("${if (isPrivacyMasking) "••••" else inboundCollected} / ${if (isPrivacyMasking) "••••" else inboundLimit}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = DynamicWhite)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -1839,7 +1937,7 @@ fun NestedCircularProgressDonut(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // Outbound/Transfer Remaining Box
-                val leftOutboundStr = "${formatter.format(leftOutbound)} ج.م"
+                val leftOutboundStr = if (isPrivacyMasking) "•••• ج.م" else "${formatter.format(leftOutbound)} ج.م"
                 val leftOutboundFontSize = if (leftOutboundStr.length > 12) 11.sp else if (leftOutboundStr.length > 9) 13.sp else 15.sp
 
                 Box(
@@ -1848,7 +1946,7 @@ fun NestedCircularProgressDonut(
                         .height(41.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(CharcoalBg.copy(alpha = 0.40f))
-                        .border(1.dp, outboundColor.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                        .border(1.dp, ExceededRed.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1860,7 +1958,7 @@ fun NestedCircularProgressDonut(
                             text = if (isMonthly) "متبقي تحويل الشهر" else "متبقي تحويل اليوم",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                             fontWeight = FontWeight.Bold,
-                            color = MutedText,
+                            color = ExceededRed.copy(alpha = 0.85f),
                             textAlign = TextAlign.Center,
                             maxLines = 1
                         )
@@ -1868,7 +1966,7 @@ fun NestedCircularProgressDonut(
                         Text(
                             text = leftOutboundStr,
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = leftOutboundFontSize, fontWeight = FontWeight.Black),
-                            color = outboundColor,
+                            color = ExceededRed,
                             textAlign = TextAlign.Center,
                             maxLines = 1
                         )
@@ -1876,7 +1974,7 @@ fun NestedCircularProgressDonut(
                 }
 
                 // Inbound/Deposit Remaining Box
-                val leftInboundStr = "${formatter.format(leftInbound)} ج.م"
+                val leftInboundStr = if (isPrivacyMasking) "•••• ج.م" else "${formatter.format(leftInbound)} ج.م"
                 val leftInboundFontSize = if (leftInboundStr.length > 12) 11.sp else if (leftInboundStr.length > 9) 13.sp else 15.sp
 
                 Box(
@@ -2704,7 +2802,8 @@ fun TransactionItemRow(
     transaction: Transaction,
     balanceAfter: Double?,
     onDelete: () -> Unit,
-    formatter: DecimalFormat
+    formatter: DecimalFormat,
+    isPrivacyMasking: Boolean = false
 ) {
     val dateString = remember(transaction.timestamp) {
         val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale("ar", "EG")).apply {
@@ -2791,7 +2890,7 @@ fun TransactionItemRow(
                     if (balanceAfter != null) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "الرصيد المتاح: ${formatter.format(balanceAfter)} ج.م",
+                            text = "الرصيد المتاح: ${if (isPrivacyMasking) "••••" else formatter.format(balanceAfter)} ج.م",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (transaction.isDeposit) SafeGreen.copy(alpha = 0.9f) else DynamicWhite.copy(alpha = 0.7f),
                             fontWeight = FontWeight.SemiBold
@@ -2809,7 +2908,11 @@ fun TransactionItemRow(
                     horizontalAlignment = Alignment.End
                 ) {
                     Text(
-                        text = if (transaction.isDeposit) "+ ${formatter.format(transaction.amount)} ج.م" else "- ${formatter.format(transaction.amount)} ج.م",
+                        text = if (transaction.isDeposit) {
+                            "+ ${if (isPrivacyMasking) "••••" else formatter.format(transaction.amount)} ج.م"
+                        } else {
+                            "- ${if (isPrivacyMasking) "••••" else formatter.format(transaction.amount)} ج.م"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Black,
                         color = if (transaction.isDeposit) SafeGreen else VodafoneLightRed
@@ -3407,6 +3510,7 @@ fun WalletBar(
     onSelectWallet: (Wallet) -> Unit,
     onAddWalletClick: () -> Unit,
     onDeleteWallet: (Wallet) -> Unit,
+    isPrivacyMasking: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val (startOfToday, startOfThisMonth) = remember(transactions) {
@@ -3585,7 +3689,7 @@ fun WalletBar(
                             Spacer(modifier = Modifier.height(4.dp))
                             val balance = walletBalances[wallet.phoneNumber] ?: wallet.initialBalance
                             Text(
-                                text = "رصيد: ${currencyFormatter.format(balance)} ج.م",
+                                text = "رصيد: ${if (isPrivacyMasking) "••••" else currencyFormatter.format(balance)} ج.م",
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Black,
                                 color = if (isActive) Color.White else SafeGreen
@@ -3856,7 +3960,7 @@ fun PinUnlockScreen(
             
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = if (isBlockedByRoot || isBlockedByDebugger) "تم قفل الوصول البرمجي" else "كاشاتى - حارس التحويلات",
+                    text = if (isBlockedByRoot || isBlockedByDebugger) "تم قفل الوصول البرمجي" else "Kashati - حارس التحويلات",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     color = Color.White,
